@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Photos Duplicate Report</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header {
+            background: #1a73e8;
+            color: white;
+            padding: 30px 20px;
+            margin-bottom: 20px;
+        }
+        header h1 { font-size: 24px; margin-bottom: 5px; }
+        header p { opacity: 0.9; font-size: 14px; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            text-align: center;
+        }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #1a73e8;
+        }
+        .stat-card .label {
+            font-size: 13px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .group {
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        .group-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .group-header h3 { font-size: 16px; }
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge-exact { background: #e8f5e9; color: #2e7d32; }
+        .badge-similar { background: #fff3e0; color: #e65100; }
+        .photo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 15px;
+            padding: 20px;
+        }
+        .photo-card {
+            border: 2px solid #eee;
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+        }
+        .photo-card.keep { border-color: #4caf50; }
+        .photo-card.delete { border-color: #f44336; }
+        .photo-card .tag {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .photo-card.keep .tag { background: #4caf50; color: white; }
+        .photo-card.delete .tag { background: #f44336; color: white; }
+        .photo-thumb {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            background: #e0e0e0;
+            display: block;
+        }
+        .photo-info {
+            padding: 12px;
+            font-size: 13px;
+        }
+        .photo-info .filename {
+            font-weight: 600;
+            word-break: break-all;
+            margin-bottom: 6px;
+        }
+        .photo-info .meta {
+            color: #666;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .photo-info .meta span { white-space: nowrap; }
+        .filter-bar {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 8px 16px;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            background: white;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        .filter-btn.active { background: #1a73e8; color: white; border-color: #1a73e8; }
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>Google Photos Duplicate Report</h1>
+            <p>Generated {{ generated }}</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <div class="stats">
+            <div class="stat-card">
+                <div class="value">{{ stats.total_photos | default(0) }}</div>
+                <div class="label">Total Photos Scanned</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ stats.duplicate_groups | default(0) }}</div>
+                <div class="label">Duplicate Groups</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ stats.duplicates_to_delete | default(0) }}</div>
+                <div class="label">Photos to Delete</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{{ stats.space_recoverable_mb | default(0) }} MB</div>
+                <div class="label">Space Recoverable</div>
+            </div>
+        </div>
+
+        <div class="filter-bar">
+            <button class="filter-btn active" onclick="filterGroups('all')">All ({{ groups|length }})</button>
+            <button class="filter-btn" onclick="filterGroups('exact')">Exact ({{ groups|selectattr('match_type', 'eq', 'exact')|list|length }})</button>
+            <button class="filter-btn" onclick="filterGroups('similar')">Similar ({{ groups|selectattr('match_type', 'eq', 'similar')|list|length }})</button>
+        </div>
+
+        {% for group in groups %}
+        <div class="group" data-type="{{ group.match_type }}">
+            <div class="group-header">
+                <h3>Group #{{ group.id }} &mdash; {{ group.delete|length + 1 }} photos</h3>
+                <div>
+                    <span class="badge badge-{{ group.match_type }}">{{ group.match_type }}</span>
+                    {% if group.hamming_distance is not none %}
+                    <span class="badge badge-similar">distance: {{ group.hamming_distance }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="photo-grid">
+                <div class="photo-card keep">
+                    <span class="tag">Keep</span>
+                    <img class="photo-thumb" src="file://{{ group.keep.path }}" alt="{{ group.keep.filename }}" loading="lazy"
+                         onerror="this.style.display='none'">
+                    <div class="photo-info">
+                        <div class="filename">{{ group.keep.filename }}</div>
+                        <div class="meta">
+                            <span>{{ group.keep.size_formatted }}</span>
+                            <span>{{ group.keep.resolution }}</span>
+                            <span>{{ group.keep.date }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% for photo in group.delete %}
+                <div class="photo-card delete">
+                    <span class="tag">Delete</span>
+                    <img class="photo-thumb" src="file://{{ photo.path }}" alt="{{ photo.filename }}" loading="lazy"
+                         onerror="this.style.display='none'">
+                    <div class="photo-info">
+                        <div class="filename">{{ photo.filename }}</div>
+                        <div class="meta">
+                            <span>{{ photo.size_formatted }}</span>
+                            <span>{{ photo.resolution }}</span>
+                            <span>{{ photo.date }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <footer>Google Photos Duplicate Scanner</footer>
+
+    <script>
+        function filterGroups(type) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            document.querySelectorAll('.group').forEach(g => {
+                g.style.display = (type === 'all' || g.dataset.type === type) ? '' : 'none';
+            });
+        }
+    </script>
+</body>
+</html>

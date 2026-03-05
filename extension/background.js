@@ -121,53 +121,18 @@ async function processNext() {
     }
 
     const tab = tabs[0];
-    let deleteResult = null;
-
-    if (item.url) {
-      // Strategy 1: Navigate directly to the photo URL
-      await navigateTab(tab.id, item.url);
-      // Give the page a moment to render the photo viewer
-      await new Promise((r) => setTimeout(r, 2000));
-
-      deleteResult = await sendTabMessage(tab.id, {
-        type: "delete-current-photo",
-      });
-    } else {
-      // Strategy 2: Search by filename
-      const searchUrl = `https://photos.google.com/search/${encodeURIComponent(item.filename)}`;
-      await navigateTab(tab.id, searchUrl);
-      // Wait for search results to render
-      await new Promise((r) => setTimeout(r, 2000));
-
-      // Tell content script to click the first search result
-      const clickResult = await sendTabMessage(tab.id, {
-        type: "click-search-result",
-      });
-
-      if (!clickResult || !clickResult.clicked) {
-        // Fallback: try searching by date
-        if (item.date && item.date !== "Unknown") {
-          const dateSearchUrl = `https://photos.google.com/search/${encodeURIComponent(item.date)}`;
-          await navigateTab(tab.id, dateSearchUrl);
-          await new Promise((r) => setTimeout(r, 2000));
-
-          const dateClickResult = await sendTabMessage(tab.id, {
-            type: "click-search-result",
-          });
-
-          if (!dateClickResult || !dateClickResult.clicked) {
-            throw new Error("Photo not found in search results");
-          }
-        } else {
-          throw new Error("Photo not found in search results");
-        }
-      }
-
-      // Now delete the opened photo
-      deleteResult = await sendTabMessage(tab.id, {
-        type: "delete-current-photo",
-      });
+    if (!item.url) {
+      throw new Error("No Google Photos URL available (missing metadata)");
     }
+
+    // Navigate directly to the photo URL
+    await navigateTab(tab.id, item.url);
+    // Give the page a moment to render the photo viewer
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const deleteResult = await sendTabMessage(tab.id, {
+      type: "delete-current-photo",
+    });
 
     if (deleteResult && deleteResult.success) {
       deletionState.completed++;

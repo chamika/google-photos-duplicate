@@ -13,13 +13,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       .catch((err) => sendResponse({ success: false, error: err.message }));
     return true;
   }
-
-  if (msg.type === "click-search-result") {
-    clickSearchResult()
-      .then((result) => sendResponse(result))
-      .catch((err) => sendResponse({ success: false, error: err.message }));
-    return true;
-  }
 });
 
 /**
@@ -27,30 +20,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
  */
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Click the first search result thumbnail on the current page.
- * Returns { success, clicked } — clicked is true if a thumbnail was found and clicked.
- */
-async function clickSearchResult() {
-  // Look for photo thumbnails in search results
-  const thumbnails = document.querySelectorAll("[data-latest-bg]");
-  if (thumbnails.length > 0) {
-    thumbnails[0].click();
-    await sleep(2000);
-    return { success: true, clicked: true };
-  }
-
-  // Try looking for any clickable photo elements
-  const photoElements = document.querySelectorAll('[aria-label*="Photo"]');
-  if (photoElements.length > 0) {
-    photoElements[0].click();
-    await sleep(2000);
-    return { success: true, clicked: true };
-  }
-
-  return { success: true, clicked: false };
 }
 
 /**

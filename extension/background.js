@@ -49,6 +49,42 @@ function startDeletion(queue, delay) {
   processNext();
 }
 
+/**
+ * Navigate a tab to a URL and wait for it to finish loading.
+ */
+function navigateTab(tabId, url) {
+  return new Promise((resolve) => {
+    function onUpdated(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    chrome.tabs.update(tabId, { url: url });
+  });
+}
+
+/**
+ * Send a message to a tab's content script, retrying a few times
+ * to handle the case where the content script hasn't fully initialized yet.
+ */
+async function sendTabMessage(tabId, message, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, message);
+      return response;
+    } catch (err) {
+      if (i < retries - 1) {
+        // Wait a bit for the content script to initialize
+        await new Promise((r) => setTimeout(r, 1000));
+      } else {
+        throw err;
+      }
+    }
+  }
+}
+
 async function processNext() {
   if (deletionState.status !== "running") return;
   if (deletionState.currentIndex >= deletionState.queue.length) {
@@ -66,7 +102,6 @@ async function processNext() {
 
   const item = deletionState.queue[deletionState.currentIndex];
 
-  // Send delete command to content script
   try {
     const tabs = await chrome.tabs.query({
       active: true,
@@ -86,14 +121,55 @@ async function processNext() {
     }
 
     const tab = tabs[0];
+    let deleteResult = null;
 
-    const response = await chrome.tabs.sendMessage(tab.id, {
-      type: "delete-photo",
-      filename: item.filename,
-      date: item.date,
-    });
+    if (item.url) {
+      // Strategy 1: Navigate directly to the photo URL
+      await navigateTab(tab.id, item.url);
+      // Give the page a moment to render the photo viewer
+      await new Promise((r) => setTimeout(r, 2000));
 
-    if (response && response.success) {
+      deleteResult = await sendTabMessage(tab.id, {
+        type: "delete-current-photo",
+      });
+    } else {
+      // Strategy 2: Search by filename
+      const searchUrl = `https://photos.google.com/search/${encodeURIComponent(item.filename)}`;
+      await navigateTab(tab.id, searchUrl);
+      // Wait for search results to render
+      await new Promise((r) => setTimeout(r, 2000));
+
+      // Tell content script to click the first search result
+      const clickResult = await sendTabMessage(tab.id, {
+        type: "click-search-result",
+      });
+
+      if (!clickResult || !clickResult.clicked) {
+        // Fallback: try searching by date
+        if (item.date && item.date !== "Unknown") {
+          const dateSearchUrl = `https://photos.google.com/search/${encodeURIComponent(item.date)}`;
+          await navigateTab(tab.id, dateSearchUrl);
+          await new Promise((r) => setTimeout(r, 2000));
+
+          const dateClickResult = await sendTabMessage(tab.id, {
+            type: "click-search-result",
+          });
+
+          if (!dateClickResult || !dateClickResult.clicked) {
+            throw new Error("Photo not found in search results");
+          }
+        } else {
+          throw new Error("Photo not found in search results");
+        }
+      }
+
+      // Now delete the opened photo
+      deleteResult = await sendTabMessage(tab.id, {
+        type: "delete-current-photo",
+      });
+    }
+
+    if (deleteResult && deleteResult.success) {
       deletionState.completed++;
       broadcastToPopup({
         type: "deletion-log",
@@ -102,7 +178,7 @@ async function processNext() {
       });
     } else {
       deletionState.failed++;
-      const reason = (response && response.error) || "Unknown error";
+      const reason = (deleteResult && deleteResult.error) || "Unknown error";
       broadcastToPopup({
         type: "deletion-log",
         text: `Failed: ${item.filename} — ${reason}`,

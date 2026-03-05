@@ -84,6 +84,7 @@ function showSummary(data) {
         filename: photo.filename,
         date: photo.date,
         groupId: group.id,
+        url: photo.url || null,
       });
     }
   }

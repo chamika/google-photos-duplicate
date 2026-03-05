@@ -28,6 +28,7 @@ class PhotoEntry:
     date_taken: Optional[str] = None
     description: Optional[str] = None
     geo: Optional[dict] = None
+    url: Optional[str] = None
     metadata: dict = field(default_factory=dict)
 
     @property
@@ -59,6 +60,8 @@ def _parse_sidecar(json_path: Path) -> dict:
                 "latitude": geo["latitude"],
                 "longitude": geo["longitude"],
             }
+    if "url" in data and data["url"]:
+        result["url"] = data["url"]
     return result
 
 
@@ -80,6 +83,7 @@ def _find_sidecar(filepath: Path) -> Optional[Path]:
     Google Takeout uses several naming patterns:
     - IMG_001.jpg.json
     - IMG_001.json (same stem)
+    - IMG_001.jpg.supplemental-metadata.json
     """
     # Pattern 1: filename.ext.json
     sidecar = filepath.parent / (filepath.name + ".json")
@@ -88,6 +92,11 @@ def _find_sidecar(filepath: Path) -> Optional[Path]:
 
     # Pattern 2: filename.json (without media extension)
     sidecar = filepath.parent / (filepath.stem + ".json")
+    if sidecar.exists():
+        return sidecar
+
+    # Pattern 3: filename.ext.supplemental-metadata.json (newer Takeout format)
+    sidecar = filepath.parent / (filepath.name + ".supplemental-metadata.json")
     if sidecar.exists():
         return sidecar
 
@@ -137,6 +146,7 @@ def scan_takeout_folder(
                 date_taken=meta.get("date_taken") or meta.get("creation_time"),
                 description=meta.get("description"),
                 geo=meta.get("geo"),
+                url=meta.get("url"),
                 metadata=meta,
             )
             entries.append(entry)

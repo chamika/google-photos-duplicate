@@ -343,6 +343,9 @@
                         height: photo.height,
                         resolution: photo.resolution
                     };
+                    if (photo.url) {
+                        photoExport.url = photo.url;
+                    }
                     if (card.classList.contains('marked')) {
                         deleteList.push(photoExport);
                     } else if (!keep) {

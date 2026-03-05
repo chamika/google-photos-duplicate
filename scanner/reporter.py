@@ -23,7 +23,7 @@ def _format_size(size_bytes: int) -> str:
 
 def _candidate_to_dict(candidate) -> dict:
     entry = candidate.entry
-    return {
+    d = {
         "filename": entry.filename,
         "path": entry.path,
         "date": entry.date_taken or "Unknown",
@@ -33,6 +33,9 @@ def _candidate_to_dict(candidate) -> dict:
         "height": entry.height,
         "resolution": f"{entry.width}x{entry.height}" if entry.width and entry.height else "Unknown",
     }
+    if entry.url:
+        d["url"] = entry.url
+    return d
 
 
 def generate_duplicates_json(
@@ -93,6 +96,7 @@ def generate_html_report(
             d = _candidate_to_dict(c)
             d["auto_delete"] = True
             photos.append(d)
+        # url is already included by _candidate_to_dict when present
         template_groups.append({
             "id": g.group_id,
             "match_type": g.match_type,

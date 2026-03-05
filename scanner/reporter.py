@@ -86,12 +86,18 @@ def generate_html_report(
 
     template_groups = []
     for g in groups:
+        keep_dict = _candidate_to_dict(g.keep)
+        keep_dict["auto_delete"] = False
+        photos = [keep_dict]
+        for c in g.delete:
+            d = _candidate_to_dict(c)
+            d["auto_delete"] = True
+            photos.append(d)
         template_groups.append({
             "id": g.group_id,
             "match_type": g.match_type,
             "hamming_distance": g.hamming_distance,
-            "keep": _candidate_to_dict(g.keep),
-            "delete": [_candidate_to_dict(c) for c in g.delete],
+            "photos": photos,
         })
 
     html = template.render(

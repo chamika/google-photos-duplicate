@@ -21,6 +21,28 @@
         }
         header h1 { font-size: 24px; margin-bottom: 5px; }
         header p { opacity: 0.9; font-size: 14px; }
+        .top-bar {
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: #fff;
+            border-bottom: 1px solid #ddd;
+            padding: 10px 20px;
+            display: flex;
+            justify-content: flex-end;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .export-btn {
+            background: #1a73e8;
+            color: white;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .export-btn:hover { background: #1558b0; }
         .stats {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -57,8 +79,24 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         .group-header h3 { font-size: 16px; }
+        .group-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .group-ctrl-btn {
+            padding: 4px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: white;
+            cursor: pointer;
+            font-size: 12px;
+        }
+        .group-ctrl-btn:hover { background: #f0f0f0; }
         .badge {
             display: inline-block;
             padding: 3px 10px;
@@ -75,13 +113,14 @@
             padding: 20px;
         }
         .photo-card {
-            border: 2px solid #eee;
+            border: 2px solid #4caf50;
             border-radius: 8px;
             overflow: hidden;
             position: relative;
+            cursor: pointer;
+            transition: border-color 0.15s;
         }
-        .photo-card.keep { border-color: #4caf50; }
-        .photo-card.delete { border-color: #f44336; }
+        .photo-card.marked { border-color: #f44336; }
         .photo-card .tag {
             position: absolute;
             top: 8px;
@@ -91,9 +130,31 @@
             font-size: 11px;
             font-weight: 700;
             text-transform: uppercase;
+            background: #4caf50;
+            color: white;
+            pointer-events: none;
         }
-        .photo-card.keep .tag { background: #4caf50; color: white; }
-        .photo-card.delete .tag { background: #f44336; color: white; }
+        .photo-card.marked .tag { background: #f44336; }
+        .photo-card .checkbox-overlay {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            width: 22px;
+            height: 22px;
+            border: 2px solid white;
+            border-radius: 4px;
+            background: rgba(255,255,255,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            pointer-events: none;
+        }
+        .photo-card.marked .checkbox-overlay {
+            background: #f44336;
+            border-color: #f44336;
+            color: white;
+        }
         .photo-thumb {
             width: 100%;
             height: 200px;
@@ -141,6 +202,10 @@
     </style>
 </head>
 <body>
+    <div class="top-bar">
+        <button class="export-btn" onclick="exportJson()">Export duplicates.json</button>
+    </div>
+
     <header>
         <div class="container">
             <h1>Google Photos Duplicate Report</h1>
@@ -159,11 +224,11 @@
                 <div class="label">Duplicate Groups</div>
             </div>
             <div class="stat-card">
-                <div class="value">{{ stats.duplicates_to_delete | default(0) }}</div>
+                <div class="value" id="stat-delete-count">{{ stats.duplicates_to_delete | default(0) }}</div>
                 <div class="label">Photos to Delete</div>
             </div>
             <div class="stat-card">
-                <div class="value">{{ stats.space_recoverable_mb | default(0) }} MB</div>
+                <div class="value" id="stat-space">{{ stats.space_recoverable_mb | default(0) }} MB</div>
                 <div class="label">Space Recoverable</div>
             </div>
         </div>
@@ -175,10 +240,12 @@
         </div>
 
         {% for group in groups %}
-        <div class="group" data-type="{{ group.match_type }}">
+        <div class="group" data-type="{{ group.match_type }}" data-group-index="{{ loop.index0 }}">
             <div class="group-header">
-                <h3>Group #{{ group.id }} &mdash; {{ group.delete|length + 1 }} photos</h3>
-                <div>
+                <h3>Group #{{ group.id }} &mdash; {{ group.photos|length }} photos</h3>
+                <div class="group-controls">
+                    <button class="group-ctrl-btn" onclick="selectAll({{ loop.index0 }})">Select All</button>
+                    <button class="group-ctrl-btn" onclick="deselectAll({{ loop.index0 }})">Deselect All</button>
                     <span class="badge badge-{{ group.match_type }}">{{ group.match_type }}</span>
                     {% if group.hamming_distance is not none %}
                     <span class="badge badge-similar">distance: {{ group.hamming_distance }}</span>
@@ -186,22 +253,15 @@
                 </div>
             </div>
             <div class="photo-grid">
-                <div class="photo-card keep">
-                    <span class="tag">Keep</span>
-                    <img class="photo-thumb" src="file://{{ group.keep.path }}" alt="{{ group.keep.filename }}" loading="lazy"
-                         onerror="this.style.display='none'">
-                    <div class="photo-info">
-                        <div class="filename">{{ group.keep.filename }}</div>
-                        <div class="meta">
-                            <span>{{ group.keep.size_formatted }}</span>
-                            <span>{{ group.keep.resolution }}</span>
-                            <span>{{ group.keep.date }}</span>
-                        </div>
-                    </div>
-                </div>
-                {% for photo in group.delete %}
-                <div class="photo-card delete">
-                    <span class="tag">Delete</span>
+                {% set group_idx = loop.index0 %}
+                {% for photo in group.photos %}
+                <div class="photo-card{% if photo.auto_delete %} marked{% endif %}"
+                     data-group="{{ group_idx }}"
+                     data-photo="{{ loop.index0 }}"
+                     data-size="{{ photo.size }}"
+                     onclick="toggleCard(this)">
+                    <span class="checkbox-overlay">{% if photo.auto_delete %}&#10003;{% endif %}</span>
+                    <span class="tag">{% if photo.auto_delete %}Delete{% else %}Keep{% endif %}</span>
                     <img class="photo-thumb" src="file://{{ photo.path }}" alt="{{ photo.filename }}" loading="lazy"
                          onerror="this.style.display='none'">
                     <div class="photo-info">
@@ -222,10 +282,123 @@
     <footer>Google Photos Duplicate Scanner</footer>
 
     <script>
+        // Group data for export
+        var groupData = {{ groups | tojson }};
+
+        function toggleCard(card) {
+            var isMarked = card.classList.toggle('marked');
+            card.querySelector('.tag').textContent = isMarked ? 'Delete' : 'Keep';
+            var cb = card.querySelector('.checkbox-overlay');
+            cb.innerHTML = isMarked ? '&#10003;' : '';
+            updateStats();
+        }
+
+        function selectAll(groupIndex) {
+            var group = document.querySelector('[data-group-index="' + groupIndex + '"]');
+            group.querySelectorAll('.photo-card').forEach(function(card) {
+                card.classList.add('marked');
+                card.querySelector('.tag').textContent = 'Delete';
+                card.querySelector('.checkbox-overlay').innerHTML = '&#10003;';
+            });
+            updateStats();
+        }
+
+        function deselectAll(groupIndex) {
+            var group = document.querySelector('[data-group-index="' + groupIndex + '"]');
+            group.querySelectorAll('.photo-card').forEach(function(card) {
+                card.classList.remove('marked');
+                card.querySelector('.tag').textContent = 'Keep';
+                card.querySelector('.checkbox-overlay').innerHTML = '';
+            });
+            updateStats();
+        }
+
+        function updateStats() {
+            var deleteCount = 0;
+            var spaceBytes = 0;
+            document.querySelectorAll('.photo-card.marked').forEach(function(card) {
+                deleteCount++;
+                spaceBytes += parseInt(card.dataset.size, 10);
+            });
+            document.getElementById('stat-delete-count').textContent = deleteCount;
+            var mb = (spaceBytes / (1024 * 1024)).toFixed(1);
+            document.getElementById('stat-space').textContent = mb + ' MB';
+        }
+
+        function exportJson() {
+            var groups = [];
+            document.querySelectorAll('.group').forEach(function(groupEl, gi) {
+                var cards = groupEl.querySelectorAll('.photo-card');
+                var keep = null;
+                var deleteList = [];
+                cards.forEach(function(card, pi) {
+                    var photo = groupData[gi].photos[pi];
+                    var photoExport = {
+                        filename: photo.filename,
+                        path: photo.path,
+                        date: photo.date,
+                        size: photo.size,
+                        size_formatted: photo.size_formatted,
+                        width: photo.width,
+                        height: photo.height,
+                        resolution: photo.resolution
+                    };
+                    if (card.classList.contains('marked')) {
+                        deleteList.push(photoExport);
+                    } else if (!keep) {
+                        keep = photoExport;
+                    } else {
+                        // Additional unmarked photos after the first go to delete? No — they stay unmarked.
+                        // We need one keep and the rest unmarked are also kept (not in delete list).
+                        // Actually per spec: first unmarked = keep, all marked = delete. Unmarked extras not included.
+                    }
+                });
+                // Skip groups with 0 deletions
+                if (deleteList.length === 0) return;
+                // If all are marked, first marked becomes keep
+                if (!keep) {
+                    keep = deleteList.shift();
+                }
+                groups.push({
+                    id: groupData[gi].id,
+                    match_type: groupData[gi].match_type,
+                    hamming_distance: groupData[gi].hamming_distance,
+                    keep: keep,
+                    delete: deleteList
+                });
+            });
+
+            var totalDeletes = 0;
+            var totalBytes = 0;
+            groups.forEach(function(g) {
+                totalDeletes += g['delete'].length;
+                g['delete'].forEach(function(p) { totalBytes += p.size; });
+            });
+
+            var output = {
+                generated: new Date().toISOString(),
+                groups: groups,
+                stats: {
+                    total_photos: {{ stats.total_photos | default(0) }},
+                    duplicate_groups: groups.length,
+                    duplicates_to_delete: totalDeletes,
+                    space_recoverable_mb: parseFloat((totalBytes / (1024 * 1024)).toFixed(1))
+                }
+            };
+
+            var blob = new Blob([JSON.stringify(output, null, 2)], {type: 'application/json'});
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'duplicates.json';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
         function filterGroups(type) {
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.filter-btn').forEach(function(b) { b.classList.remove('active'); });
             event.target.classList.add('active');
-            document.querySelectorAll('.group').forEach(g => {
+            document.querySelectorAll('.group').forEach(function(g) {
                 g.style.display = (type === 'all' || g.dataset.type === type) ? '' : 'none';
             });
         }

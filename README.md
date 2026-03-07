@@ -30,8 +30,18 @@ python -m scanner /path/to/Takeout --output ./report
 
 ### Output
 
-- `report/report.html` — Visual report with duplicate groups, thumbnails, and keep/delete recommendations
+- `report/report.html` — Interactive visual report with duplicate groups and thumbnails
 - `report/duplicates.json` — Machine-readable duplicate list for the Chrome extension
+
+### Reviewing & Customising Deletions
+
+Open `report.html` in a browser to review the scanner's recommendations:
+
+- Each photo card has a **checkbox** — click any card to toggle it between **Keep** (green) and **Delete** (red)
+- Cards are pre-filled with the scanner's auto-recommendations
+- Use **Select All** / **Deselect All** buttons per group to quickly adjust
+- The **Photos to Delete** and **Space Recoverable** stats update live as you toggle
+- Click **Export duplicates.json** (sticky button at top) to download a new `duplicates.json` reflecting your selections — this is the file you load into the Chrome extension
 
 ## Chrome Extension
 

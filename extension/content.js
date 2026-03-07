@@ -57,6 +57,17 @@ async function deleteCurrentPhoto() {
     await sleep(1000);
   }
 
+  // Handle stacked photos dialog — click "Current photo only" if present
+  const allElements = document.querySelectorAll("span, button, div");
+  for (const el of allElements) {
+    const text = el.textContent.trim().toLowerCase();
+    if (text === "current photo only") {
+      el.click();
+      await sleep(1000);
+      break;
+    }
+  }
+
   // Confirm deletion in the dialog
   const confirmSelectors = [
     'button[aria-label="Move to trash"]',

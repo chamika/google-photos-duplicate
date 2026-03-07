@@ -6,3 +6,16 @@ __pycache__/
 
 
 
+.DS_Store
+.idea/
+*.iml
+*.log
+*.bak
+*.tmp
+*.swp
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+# Ignore report files
+report
+reports**/**

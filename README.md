@@ -7,13 +7,17 @@ Find and remove duplicate photos from your Google Photos library using Google Ta
 1. **Python CLI Scanner** — Scans a Google Takeout export, identifies exact and visually similar duplicates, generates an HTML report and `duplicates.json`
 2. **Chrome Extension** — Loads `duplicates.json` and bulk-deletes duplicates from the Google Photos web UI
 
-## Python Scanner
-
-### Install
+## Setup
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
+
+**Requirements:** Python 3.9+, dependencies: Pillow, imagehash, tqdm, Jinja2
+
+## Python Scanner
 
 ### Usage
 

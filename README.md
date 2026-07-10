@@ -27,6 +27,8 @@ python -m scanner /path/to/Takeout --output ./report
 
 **Options:**
 - `--threshold N` — Hamming distance for similarity matching (default: 10, lower = stricter)
+- `--time-window N` — Seconds within which capture times count as close; pairs taken farther apart must meet `--strict-threshold` instead of `--threshold`. Set to 0 to disable (default: 600)
+- `--strict-threshold N` — Hamming distance for photo pairs taken far apart in time (default: half of `--threshold`)
 - `--exact-only` — Only find exact duplicates (faster, skip perceptual hashing)
 - `--output DIR` — Output directory (default: `./report`)
 - `--cache-dir DIR` — Custom hash cache location

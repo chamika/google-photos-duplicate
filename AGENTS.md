@@ -76,7 +76,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-**Dependencies:** Pillow, imagehash, tqdm, Jinja2
+**Dependencies:** Pillow, imagehash, numpy, tqdm, Jinja2
 
 ### Running the scanner
 
@@ -84,7 +84,7 @@ pip install -r requirements.txt
 python -m scanner /path/to/Takeout --output ./report
 ```
 
-Key flags: `--threshold N` (hamming distance, default 10), `--exact-only`, `--workers N`, `--cache-dir DIR`.
+Key flags: `--threshold N` (hamming distance, default 10), `--time-window N` (seconds; pairs captured farther apart than this must meet `--strict-threshold`, default 600, 0 disables), `--strict-threshold N` (default: half of `--threshold`), `--exact-only`, `--workers N`, `--cache-dir DIR`.
 
 ### Loading the extension
 

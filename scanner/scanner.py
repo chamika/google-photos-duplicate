@@ -26,6 +26,7 @@ class PhotoEntry:
     width: Optional[int] = None
     height: Optional[int] = None
     date_taken: Optional[str] = None
+    timestamp: Optional[int] = None  # epoch seconds from sidecar photoTakenTime
     description: Optional[str] = None
     geo: Optional[dict] = None
     url: Optional[str] = None
@@ -36,6 +37,14 @@ class PhotoEntry:
         if self.width and self.height:
             return self.width * self.height
         return 0
+
+
+def _parse_epoch(value) -> Optional[int]:
+    """Parse a sidecar epoch timestamp (stored as a string, e.g. \"1532183964\")."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _parse_sidecar(json_path: Path) -> dict:
@@ -49,8 +58,11 @@ def _parse_sidecar(json_path: Path) -> dict:
     result = {}
     if "photoTakenTime" in data:
         result["date_taken"] = data["photoTakenTime"].get("formatted")
+        result["timestamp"] = _parse_epoch(data["photoTakenTime"].get("timestamp"))
     if "creationTime" in data:
         result["creation_time"] = data["creationTime"].get("formatted")
+        if result.get("timestamp") is None:
+            result["timestamp"] = _parse_epoch(data["creationTime"].get("timestamp"))
     if "description" in data:
         result["description"] = data["description"]
     if "geoData" in data:
@@ -144,6 +156,7 @@ def scan_takeout_folder(
                 width=width,
                 height=height,
                 date_taken=meta.get("date_taken") or meta.get("creation_time"),
+                timestamp=meta.get("timestamp"),
                 description=meta.get("description"),
                 geo=meta.get("geo"),
                 url=meta.get("url"),

@@ -3,10 +3,13 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
-import imagehash
+import numpy as np
+from tqdm import tqdm
 
 from .hasher import HashResult
 from .scanner import PhotoEntry
+
+_POPCOUNT = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint16)
 
 
 @dataclass
@@ -32,19 +35,12 @@ def _pick_best(candidates: list[DuplicateCandidate]) -> tuple[DuplicateCandidate
     def sort_key(c: DuplicateCandidate):
         size = c.entry.size or 0
         resolution = c.entry.resolution
-        # Earlier date = better, so we negate the string comparison (or use empty for missing)
-        date = c.entry.date_taken or "9999"
+        # Earlier capture time = better (the original); missing timestamps sort last
+        date = c.entry.timestamp if c.entry.timestamp is not None else float("inf")
         return (-size, -resolution, date)
 
     sorted_candidates = sorted(candidates, key=sort_key)
     return sorted_candidates[0], sorted_candidates[1:]
-
-
-def _hamming_distance(hash1: str, hash2: str) -> int:
-    """Compute Hamming distance between two hex-encoded imagehash strings."""
-    h1 = imagehash.hex_to_hash(hash1)
-    h2 = imagehash.hex_to_hash(hash2)
-    return h1 - h2
 
 
 def find_duplicates(
@@ -52,6 +48,8 @@ def find_duplicates(
     hash_results: list[HashResult],
     threshold: int = 10,
     exact_only: bool = False,
+    time_window: int = 600,
+    strict_threshold: Optional[int] = None,
 ) -> list[DuplicateGroup]:
     """Find duplicate photo groups.
 
@@ -60,10 +58,19 @@ def find_duplicates(
         hash_results: Corresponding HashResult objects.
         threshold: Maximum Hamming distance for similar photos (default 10).
         exact_only: If True, skip perceptual hashing.
+        time_window: Seconds within which two capture times count as "close".
+            Pairs taken close together (bursts, edits, re-uploads) match at the
+            full threshold; pairs far apart must meet strict_threshold instead,
+            filtering out look-alike but unrelated photos. Set <= 0 to disable.
+        strict_threshold: Maximum Hamming distance for pairs whose capture
+            times are farther apart than time_window (default: threshold // 2).
+            Pairs with unknown capture times keep the full threshold.
 
     Returns:
         List of DuplicateGroup objects.
     """
+    if strict_threshold is None:
+        strict_threshold = threshold // 2
     # Build lookup maps
     path_to_entry: dict[str, PhotoEntry] = {e.path: e for e in entries}
     path_to_hash: dict[str, HashResult] = {h.filepath: h for h in hash_results}
@@ -118,7 +125,9 @@ def find_duplicates(
         if hr.filepath not in exact_duplicate_paths or hr.filepath in kept_paths:
             remaining.append((hr.filepath, hr.dhash))
 
-    # Brute-force pairwise comparison with union-find for clustering
+    # Vectorized pairwise comparison with union-find for clustering.
+    # Pre-decode each dhash hex string into a uint8 byte row once, so the inner
+    # comparison is a vectorized XOR + popcount instead of ~n^2 hex parses.
     n = len(remaining)
     parent = list(range(n))
 
@@ -136,13 +145,35 @@ def find_duplicates(
     # Track minimum distances within clusters
     min_distances: dict[tuple[int, int], int] = {}
 
-    for i in range(n):
-        for j in range(i + 1, n):
-            dist = _hamming_distance(remaining[i][1], remaining[j][1])
-            if dist <= threshold:
+    if n > 1:
+        # Stack all dhashes into an (n, hash_bytes) uint8 array.
+        hash_bytes = len(remaining[0][1]) // 2
+        H = np.empty((n, hash_bytes), dtype=np.uint8)
+        for k in range(n):
+            H[k] = np.frombuffer(bytes.fromhex(remaining[k][1]), dtype=np.uint8)
+
+        # Capture times (epoch seconds, NaN when unknown) aligned with `remaining`.
+        T = np.full(n, np.nan)
+        for k in range(n):
+            entry = path_to_entry.get(remaining[k][0])
+            if entry is not None and entry.timestamp is not None:
+                T[k] = entry.timestamp
+
+        for i in tqdm(range(n - 1), desc="Matching", unit="photo"):
+            xor = np.bitwise_xor(H[i + 1:], H[i])
+            dists = _POPCOUNT[xor].sum(axis=1)
+            if time_window > 0:
+                # Pairs far apart in time must meet the stricter threshold;
+                # NaN comparisons are False, so unknown times keep the full threshold.
+                far_in_time = np.abs(T[i + 1:] - T[i]) > time_window
+                allowed = np.where(far_in_time, strict_threshold, threshold)
+            else:
+                allowed = threshold
+            matches = np.flatnonzero(dists <= allowed)
+            for off in matches:
+                j = i + 1 + int(off)
                 union(i, j)
-                pair = (min(i, j), max(i, j))
-                min_distances[pair] = dist
+                min_distances[(i, j)] = int(dists[off])
 
     # Collect clusters
     clusters: dict[int, list[int]] = {}

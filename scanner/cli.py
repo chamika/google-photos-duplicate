@@ -28,6 +28,21 @@ def main():
         help="Hamming distance threshold for similar photos (default: 10)",
     )
     parser.add_argument(
+        "--time-window",
+        type=int,
+        default=600,
+        help="Seconds within which capture times count as close; pairs taken "
+             "farther apart must meet --strict-threshold instead of --threshold. "
+             "Set to 0 to disable time-aware matching (default: 600)",
+    )
+    parser.add_argument(
+        "--strict-threshold",
+        type=int,
+        default=None,
+        help="Hamming distance threshold for photo pairs taken far apart in time "
+             "(default: half of --threshold)",
+    )
+    parser.add_argument(
         "--output",
         default="./report",
         help="Output directory for report.html and duplicates.json (default: ./report)",
@@ -90,6 +105,8 @@ def main():
         hash_results,
         threshold=args.threshold,
         exact_only=args.exact_only,
+        time_window=args.time_window,
+        strict_threshold=args.strict_threshold,
     )
 
     if not groups:

@@ -1,6 +1,9 @@
 """Find duplicate groups: exact (SHA256) and visually similar (dhash Hamming distance)."""
 
+import re
 from dataclasses import dataclass, field
+from itertools import combinations
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -10,6 +13,26 @@ from .hasher import HashResult
 from .scanner import PhotoEntry
 
 _POPCOUNT = np.array([bin(i).count("1") for i in range(256)], dtype=np.uint16)
+
+# Google Takeout duplicate-name markers: IMG_001-edited.jpg, IMG_001(1).jpg
+_VARIANT_SUFFIX_RE = re.compile(r"(?:-edited|\(\d+\))$")
+
+
+def _normalized_stem(filename: str) -> str:
+    """Strip Takeout duplicate-name markers from a filename's stem."""
+    stem = Path(filename).stem
+    while True:
+        stripped = _VARIANT_SUFFIX_RE.sub("", stem)
+        if stripped == stem:
+            return stem
+        stem = stripped
+
+
+def _haversine_meters(lat1, lon1, lat2, lon2):
+    """Great-circle distance in meters; NaN inputs yield NaN."""
+    p1, p2 = np.radians(lat1), np.radians(lat2)
+    a = np.sin((p2 - p1) / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(np.radians(lon2 - lon1) / 2) ** 2
+    return 2 * 6371000.0 * np.arcsin(np.sqrt(a))
 
 
 @dataclass
@@ -50,6 +73,7 @@ def find_duplicates(
     exact_only: bool = False,
     time_window: int = 600,
     strict_threshold: Optional[int] = None,
+    geo_window: float = 1000.0,
 ) -> list[DuplicateGroup]:
     """Find duplicate photo groups.
 
@@ -63,8 +87,11 @@ def find_duplicates(
             full threshold; pairs far apart must meet strict_threshold instead,
             filtering out look-alike but unrelated photos. Set <= 0 to disable.
         strict_threshold: Maximum Hamming distance for pairs whose capture
-            times are farther apart than time_window (default: threshold // 2).
-            Pairs with unknown capture times keep the full threshold.
+            times or locations disagree (default: threshold // 2). Pairs with
+            unknown capture times/locations keep the full threshold.
+        geo_window: Meters within which two GPS locations count as "close".
+            Pairs tagged farther apart than this must meet strict_threshold,
+            like far-apart capture times. Set <= 0 to disable.
 
     Returns:
         List of DuplicateGroup objects.
@@ -152,28 +179,60 @@ def find_duplicates(
         for k in range(n):
             H[k] = np.frombuffer(bytes.fromhex(remaining[k][1]), dtype=np.uint8)
 
-        # Capture times (epoch seconds, NaN when unknown) aligned with `remaining`.
+        # Capture times (epoch seconds) and GPS coordinates aligned with
+        # `remaining`, NaN when unknown.
         T = np.full(n, np.nan)
+        LAT = np.full(n, np.nan)
+        LON = np.full(n, np.nan)
         for k in range(n):
             entry = path_to_entry.get(remaining[k][0])
-            if entry is not None and entry.timestamp is not None:
+            if entry is None:
+                continue
+            if entry.timestamp is not None:
                 T[k] = entry.timestamp
+            if entry.geo:
+                LAT[k] = entry.geo["latitude"]
+                LON[k] = entry.geo["longitude"]
 
         for i in tqdm(range(n - 1), desc="Matching", unit="photo"):
             xor = np.bitwise_xor(H[i + 1:], H[i])
             dists = _POPCOUNT[xor].sum(axis=1)
+            # Pairs whose metadata disagrees (capture times or GPS locations far
+            # apart) must meet the stricter threshold; NaN comparisons are False,
+            # so unknown metadata keeps the full threshold.
+            demote = None
             if time_window > 0:
-                # Pairs far apart in time must meet the stricter threshold;
-                # NaN comparisons are False, so unknown times keep the full threshold.
-                far_in_time = np.abs(T[i + 1:] - T[i]) > time_window
-                allowed = np.where(far_in_time, strict_threshold, threshold)
-            else:
-                allowed = threshold
+                demote = np.abs(T[i + 1:] - T[i]) > time_window
+            if geo_window > 0:
+                far_in_space = _haversine_meters(LAT[i], LON[i], LAT[i + 1:], LON[i + 1:]) > geo_window
+                demote = far_in_space if demote is None else demote | far_in_space
+            allowed = threshold if demote is None else np.where(demote, strict_threshold, threshold)
             matches = np.flatnonzero(dists <= allowed)
             for off in matches:
                 j = i + 1 + int(off)
                 union(i, j)
                 min_distances[(i, j)] = int(dists[off])
+
+        # Phase 2b: Takeout name variants. A file whose name only differs by a
+        # duplicate marker (IMG_001-edited.jpg, IMG_001(1).jpg) sitting in the
+        # same directory as its base is near-certainly derived from it, so allow
+        # a relaxed distance for those pairs (edits can shift the hash a lot).
+        relaxed_threshold = threshold * 2
+        is_variant = [Path(fp).stem != _normalized_stem(fp) for fp, _ in remaining]
+        by_name: dict[tuple[str, str, str], list[int]] = {}
+        for k, (fp, _) in enumerate(remaining):
+            p = Path(fp)
+            by_name.setdefault((str(p.parent), _normalized_stem(fp), p.suffix.lower()), []).append(k)
+        for indices in by_name.values():
+            if len(indices) < 2:
+                continue
+            for a, b in combinations(indices, 2):
+                if not (is_variant[a] or is_variant[b]):
+                    continue
+                dist = int(_POPCOUNT[np.bitwise_xor(H[a], H[b])].sum())
+                if dist <= relaxed_threshold:
+                    union(a, b)
+                    min_distances.setdefault((min(a, b), max(a, b)), dist)
 
     # Collect clusters
     clusters: dict[int, list[int]] = {}

@@ -17,9 +17,9 @@ Google Photos Duplicate Finder & Deleter — a two-part tool that identifies dup
 |------|---------|
 | `__main__.py` | Entry point for `python -m scanner` |
 | `cli.py` | Argument parsing, orchestrates scan → hash → match → report pipeline |
-| `scanner.py` | Walks Takeout folder, indexes media files, parses `.json` sidecar metadata |
+| `scanner.py` | Walks Takeout folder, indexes media files, parses `.json` sidecar metadata (falls back to EXIF DateTimeOriginal for capture time) |
 | `hasher.py` | SHA256 + dhash (perceptual) hashing with file-based caching and multiprocessing |
-| `matcher.py` | Groups duplicates: exact by SHA256, similar by dhash Hamming distance with union-find clustering |
+| `matcher.py` | Groups duplicates: exact by SHA256, similar by dhash Hamming distance with union-find clustering. Capture-time and GPS metadata demote disagreeing pairs to a stricter threshold; Takeout name variants (`-edited`, `(N)`) in the same directory match at a relaxed threshold |
 | `reporter.py` | Generates `report.html` (Jinja2) and `duplicates.json` |
 | `templates/report.html` | Interactive HTML report with checkboxes, live stats, and JSON export |
 
@@ -84,7 +84,7 @@ pip install -r requirements.txt
 python -m scanner /path/to/Takeout --output ./report
 ```
 
-Key flags: `--threshold N` (hamming distance, default 10), `--time-window N` (seconds; pairs captured farther apart than this must meet `--strict-threshold`, default 600, 0 disables), `--strict-threshold N` (default: half of `--threshold`), `--exact-only`, `--workers N`, `--cache-dir DIR`.
+Key flags: `--threshold N` (hamming distance, default 10), `--time-window N` (seconds; pairs captured farther apart than this must meet `--strict-threshold`, default 600, 0 disables), `--geo-window N` (meters; same demotion for far-apart GPS locations, default 1000, 0 disables), `--strict-threshold N` (default: half of `--threshold`), `--exact-only`, `--workers N`, `--cache-dir DIR`.
 
 ### Loading the extension
 

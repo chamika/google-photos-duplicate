@@ -43,6 +43,14 @@ def main():
              "(default: half of --threshold)",
     )
     parser.add_argument(
+        "--geo-window",
+        type=float,
+        default=1000,
+        help="Meters within which GPS locations count as close; pairs tagged "
+             "farther apart must meet --strict-threshold instead of --threshold. "
+             "Set to 0 to disable geo-aware matching (default: 1000)",
+    )
+    parser.add_argument(
         "--output",
         default="./report",
         help="Output directory for report.html and duplicates.json (default: ./report)",
@@ -107,6 +115,7 @@ def main():
         exact_only=args.exact_only,
         time_window=args.time_window,
         strict_threshold=args.strict_threshold,
+        geo_window=args.geo_window,
     )
 
     if not groups:

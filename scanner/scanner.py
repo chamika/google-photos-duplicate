@@ -3,6 +3,7 @@
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -77,16 +78,41 @@ def _parse_sidecar(json_path: Path) -> dict:
     return result
 
 
-def _get_image_dimensions(filepath: str) -> tuple[Optional[int], Optional[int]]:
-    """Get image width and height. Returns (None, None) for videos or on error."""
+def _read_exif_datetime(img) -> Optional[datetime]:
+    """Read EXIF DateTimeOriginal (or DateTime) as a naive local datetime."""
+    try:
+        exif = img.getexif()
+    except Exception:
+        return None
+    value = None
+    try:
+        value = exif.get_ifd(0x8769).get(36867)  # Exif IFD / DateTimeOriginal
+    except Exception:
+        pass
+    if not value:
+        value = exif.get(306)  # IFD0 / DateTime
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.strptime(value.strip(), "%Y:%m:%d %H:%M:%S")
+    except ValueError:
+        return None
+
+
+def _read_image_info(filepath: str) -> tuple[Optional[int], Optional[int], Optional[datetime]]:
+    """Get image width, height and EXIF capture time.
+
+    Returns (None, None, None) for videos or on error.
+    """
     ext = Path(filepath).suffix.lower()
     if ext in {".mp4", ".mov"}:
-        return None, None
+        return None, None, None
     try:
         with Image.open(filepath) as img:
-            return img.size  # (width, height)
+            width, height = img.size
+            return width, height, _read_exif_datetime(img)
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def _find_sidecar(filepath: Path) -> Optional[Path]:
@@ -143,11 +169,21 @@ def scan_takeout_folder(
                 continue
 
             stat = fpath.stat()
-            width, height = _get_image_dimensions(str(fpath))
+            width, height, exif_taken = _read_image_info(str(fpath))
 
             # Parse sidecar metadata
             sidecar_path = _find_sidecar(fpath)
             meta = _parse_sidecar(sidecar_path) if sidecar_path else {}
+
+            # Fall back to EXIF capture time when there's no sidecar timestamp.
+            # EXIF times are naive local time — close enough for gap comparisons.
+            timestamp = meta.get("timestamp")
+            date_taken = meta.get("date_taken") or meta.get("creation_time")
+            if exif_taken is not None:
+                if timestamp is None:
+                    timestamp = int(exif_taken.timestamp())
+                if date_taken is None:
+                    date_taken = exif_taken.strftime("%Y-%m-%d %H:%M:%S")
 
             entry = PhotoEntry(
                 path=str(fpath),
@@ -155,8 +191,8 @@ def scan_takeout_folder(
                 size=stat.st_size,
                 width=width,
                 height=height,
-                date_taken=meta.get("date_taken") or meta.get("creation_time"),
-                timestamp=meta.get("timestamp"),
+                date_taken=date_taken,
+                timestamp=timestamp,
                 description=meta.get("description"),
                 geo=meta.get("geo"),
                 url=meta.get("url"),

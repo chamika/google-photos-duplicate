@@ -3,6 +3,7 @@
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 from jinja2 import Environment, FileSystemLoader
 
@@ -21,7 +22,7 @@ def _format_size(size_bytes: int) -> str:
         return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
 
-def _candidate_to_dict(candidate) -> dict:
+def _candidate_to_dict(candidate, keep_url: Optional[str] = None) -> dict:
     entry = candidate.entry
     d = {
         "filename": entry.filename,
@@ -33,7 +34,10 @@ def _candidate_to_dict(candidate) -> dict:
         "height": entry.height,
         "resolution": f"{entry.width}x{entry.height}" if entry.width and entry.height else "Unknown",
     }
-    if entry.url:
+    # A delete candidate sharing the keep's URL is the same Google Photos
+    # object (Takeout album copy or -edited variant) — deleting by that URL
+    # would delete the kept photo too, so don't publish it for deletion.
+    if entry.url and entry.url != keep_url:
         d["url"] = entry.url
     return d
 
@@ -55,7 +59,7 @@ def generate_duplicates_json(
                 "match_type": g.match_type,
                 "hamming_distance": g.hamming_distance,
                 "keep": _candidate_to_dict(g.keep),
-                "delete": [_candidate_to_dict(c) for c in g.delete],
+                "delete": [_candidate_to_dict(c, keep_url=g.keep.entry.url) for c in g.delete],
             }
             for g in groups
         ],
@@ -93,7 +97,7 @@ def generate_html_report(
         keep_dict["auto_delete"] = False
         photos = [keep_dict]
         for c in g.delete:
-            d = _candidate_to_dict(c)
+            d = _candidate_to_dict(c, keep_url=g.keep.entry.url)
             d["auto_delete"] = True
             photos.append(d)
         # url is already included by _candidate_to_dict when present

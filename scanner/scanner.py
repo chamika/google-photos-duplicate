@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -115,28 +116,47 @@ def _read_image_info(filepath: str) -> tuple[Optional[int], Optional[int], Optio
         return None, None, None
 
 
-def _find_sidecar(filepath: Path) -> Optional[Path]:
-    """Find the companion .json sidecar for a media file.
+def _sidecar_candidates(filepath: Path):
+    """Yield possible sidecar names for a media file.
 
     Google Takeout uses several naming patterns:
     - IMG_001.jpg.json
     - IMG_001.json (same stem)
-    - IMG_001.jpg.supplemental-metadata.json
+    - IMG_001.jpg.supplemental-metadata.json (newer Takeout format)
+    - Truncated: the sidecar's base name is capped at 46 chars, e.g.
+      IMG_20180612_124903_HDR.jpg.supplemental-metad.json
+    - Duplicate counter relocated before .json: for IMG_001(1).jpg the sidecar
+      is IMG_001.jpg.supplemental-metadata(1).json (also truncated to 46 chars
+      counting the counter), or IMG_001.jpg(1).json in older exports
     """
-    # Pattern 1: filename.ext.json
-    sidecar = filepath.parent / (filepath.name + ".json")
-    if sidecar.exists():
-        return sidecar
+    parent, name = filepath.parent, filepath.name
+    yield parent / (name + ".json")
+    yield parent / (filepath.stem + ".json")
+    yield parent / (name + ".supplemental-metadata.json")
+    yield parent / ((name + ".supplemental-metadata")[:46] + ".json")
 
-    # Pattern 2: filename.json (without media extension)
-    sidecar = filepath.parent / (filepath.stem + ".json")
-    if sidecar.exists():
-        return sidecar
+    m = re.match(r"^(.*)\((\d+)\)(\.\w+)$", name)
+    if m:
+        base, n, ext = m.groups()
+        counter = f"({n})"
+        yield parent / (base + ext + f".supplemental-metadata{counter}.json")
+        yield parent / ((base + ext + ".supplemental-metadata")[:46 - len(counter)] + counter + ".json")
+        yield parent / (base + ext + counter + ".json")
 
-    # Pattern 3: filename.ext.supplemental-metadata.json (newer Takeout format)
-    sidecar = filepath.parent / (filepath.name + ".supplemental-metadata.json")
-    if sidecar.exists():
-        return sidecar
+
+def _find_sidecar(filepath: Path) -> Optional[Path]:
+    """Find the companion .json sidecar for a media file."""
+    for candidate in _sidecar_candidates(filepath):
+        if candidate.exists():
+            return candidate
+
+    # "-edited" variants have no own sidecar: they are the same Google Photos
+    # object as the original, so the original's sidecar applies to both.
+    if filepath.stem.endswith("-edited"):
+        base = filepath.parent / (filepath.stem[: -len("-edited")] + filepath.suffix)
+        for candidate in _sidecar_candidates(base):
+            if candidate.exists():
+                return candidate
 
     return None
 

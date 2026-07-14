@@ -19,3 +19,5 @@ __pycache__/
 # Ignore report files
 report
 reports**/**
+# Generated scan reports contain personal photo URLs and paths
+report*/

@@ -51,6 +51,16 @@ def main():
              "Set to 0 to disable geo-aware matching (default: 1000)",
     )
     parser.add_argument(
+        "--exclude-album",
+        action="append",
+        metavar="NAME",
+        default=None,
+        help="Album folder whose photos are never marked for deletion "
+             "(identical copies elsewhere are protected too). Repeat the flag "
+             "for multiple albums; passing it replaces the default. "
+             "Use --exclude-album '' to disable. (default: Instagram)",
+    )
+    parser.add_argument(
         "--output",
         default="./report",
         help="Output directory for report.html and duplicates.json (default: ./report)",
@@ -107,6 +117,12 @@ def main():
         print(f"Warning: {len(errors)} files had hashing errors.")
 
     # Step 3: Find duplicates
+    if args.exclude_album is None:
+        exclude_albums = ["Instagram"]
+    else:
+        exclude_albums = [a for a in args.exclude_album if a]
+    if exclude_albums:
+        print(f"Excluded albums (never deleted): {', '.join(exclude_albums)}")
     print("Finding duplicates...")
     groups = find_duplicates(
         entries,
@@ -116,6 +132,7 @@ def main():
         time_window=args.time_window,
         strict_threshold=args.strict_threshold,
         geo_window=args.geo_window,
+        exclude_albums=exclude_albums,
     )
 
     if not groups:

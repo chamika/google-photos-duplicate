@@ -50,20 +50,52 @@ class DuplicateGroup:
     hamming_distance: Optional[int] = None  # For similar matches
 
 
-def _pick_best(candidates: list[DuplicateCandidate]) -> tuple[DuplicateCandidate, list[DuplicateCandidate]]:
+def _pick_best(
+    candidates: list[DuplicateCandidate],
+    protected: frozenset[str] = frozenset(),
+) -> tuple[DuplicateCandidate, list[DuplicateCandidate]]:
     """Choose the best photo to keep from a group of duplicates.
 
-    Priority: largest file size → highest resolution → earliest date (original).
+    Priority: protected (excluded-album) photos first, then largest file size →
+    highest resolution → earliest date (original).
     """
     def sort_key(c: DuplicateCandidate):
         size = c.entry.size or 0
         resolution = c.entry.resolution
         # Earlier capture time = better (the original); missing timestamps sort last
         date = c.entry.timestamp if c.entry.timestamp is not None else float("inf")
-        return (-size, -resolution, date)
+        return (c.entry.path not in protected, -size, -resolution, date)
 
     sorted_candidates = sorted(candidates, key=sort_key)
     return sorted_candidates[0], sorted_candidates[1:]
+
+
+def _protected_paths(
+    entries: list[PhotoEntry],
+    hash_results: list[HashResult],
+    exclude_albums: list[str],
+) -> frozenset[str]:
+    """Paths that must never become delete candidates.
+
+    A photo is protected when its immediate album folder matches an excluded
+    album name (case-insensitive). Protection propagates to identical copies
+    elsewhere (same file content or same Google Photos URL): Takeout duplicates
+    album photos into other folders, but they are one photo in Google Photos,
+    so deleting any copy would remove it from the excluded album too.
+    """
+    excluded = {a.lower() for a in exclude_albums}
+    direct = [e for e in entries if Path(e.path).parent.name.lower() in excluded]
+    if not direct:
+        return frozenset()
+
+    protected = {e.path for e in direct}
+    path_to_sha = {h.filepath: h.sha256 for h in hash_results if h.sha256}
+    shas = {path_to_sha[p] for p in protected if p in path_to_sha}
+    urls = {e.url for e in direct if e.url}
+    for e in entries:
+        if path_to_sha.get(e.path) in shas or (e.url and e.url in urls):
+            protected.add(e.path)
+    return frozenset(protected)
 
 
 def find_duplicates(
@@ -74,6 +106,7 @@ def find_duplicates(
     time_window: int = 600,
     strict_threshold: Optional[int] = None,
     geo_window: float = 1000.0,
+    exclude_albums: Optional[list[str]] = None,
 ) -> list[DuplicateGroup]:
     """Find duplicate photo groups.
 
@@ -92,12 +125,18 @@ def find_duplicates(
         geo_window: Meters within which two GPS locations count as "close".
             Pairs tagged farther apart than this must meet strict_threshold,
             like far-apart capture times. Set <= 0 to disable.
+        exclude_albums: Album folder names whose photos are never marked for
+            deletion. Protected photos are preferred as the group's "keep";
+            identical copies elsewhere are protected too. Groups with nothing
+            left to delete are dropped.
 
     Returns:
         List of DuplicateGroup objects.
     """
     if strict_threshold is None:
         strict_threshold = threshold // 2
+
+    protected = _protected_paths(entries, hash_results, exclude_albums) if exclude_albums else frozenset()
     # Build lookup maps
     path_to_entry: dict[str, PhotoEntry] = {e.path: e for e in entries}
     path_to_hash: dict[str, HashResult] = {h.filepath: h for h in hash_results}
@@ -128,8 +167,13 @@ def find_duplicates(
         if len(candidates) < 2:
             continue
 
+        keep, delete = _pick_best(candidates, protected)
+        delete = [c for c in delete if c.entry.path not in protected]
+        if not delete:
+            # Everything in the group is protected; leave members for phase 2
+            continue
+
         group_id += 1
-        keep, delete = _pick_best(candidates)
         groups.append(DuplicateGroup(
             group_id=group_id,
             match_type="exact",
@@ -266,8 +310,12 @@ def find_duplicates(
                     if cluster_dist is None or d < cluster_dist:
                         cluster_dist = d
 
+        keep, delete = _pick_best(candidates, protected)
+        delete = [c for c in delete if c.entry.path not in protected]
+        if not delete:
+            continue
+
         group_id += 1
-        keep, delete = _pick_best(candidates)
         groups.append(DuplicateGroup(
             group_id=group_id,
             match_type="similar",

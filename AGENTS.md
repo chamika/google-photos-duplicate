@@ -31,7 +31,7 @@ Google Photos Duplicate Finder & Deleter — a two-part tool that identifies dup
 - `DuplicateCandidate` — a `PhotoEntry` + `HashResult` pair
 - `DuplicateGroup` — one "keep" candidate + list of "delete" candidates, with match type and hamming distance
 
-**Keep selection priority:** largest file size → highest resolution → earliest date.
+**Keep selection priority:** excluded-album (protected) photos first → largest file size → highest resolution → earliest date. Photos in excluded albums (`--exclude-album`, default `Instagram`) never appear in delete lists; identical copies (same SHA256 or same Google Photos URL) are protected too, and groups with nothing left to delete are dropped.
 
 ### Chrome Extension (`extension/`)
 
@@ -84,7 +84,7 @@ pip install -r requirements.txt
 python -m scanner /path/to/Takeout --output ./report
 ```
 
-Key flags: `--threshold N` (hamming distance, default 10), `--time-window N` (seconds; pairs captured farther apart than this must meet `--strict-threshold`, default 600, 0 disables), `--geo-window N` (meters; same demotion for far-apart GPS locations, default 1000, 0 disables), `--strict-threshold N` (default: half of `--threshold`), `--exact-only`, `--workers N`, `--cache-dir DIR`.
+Key flags: `--threshold N` (hamming distance, default 10), `--time-window N` (seconds; pairs captured farther apart than this must meet `--strict-threshold`, default 600, 0 disables), `--geo-window N` (meters; same demotion for far-apart GPS locations, default 1000, 0 disables), `--strict-threshold N` (default: half of `--threshold`), `--exclude-album NAME` (repeatable; photos in these albums are never deleted, default Instagram), `--exact-only`, `--workers N`, `--cache-dir DIR`.
 
 ### Loading the extension
 
